@@ -14,6 +14,7 @@ interface Question {
   id: string;
   questionText: string;
   answerKey: string;
+  marks: number;
 }
 
 const CreateExam = () => {
@@ -22,13 +23,13 @@ const CreateExam = () => {
   const [examTitle, setExamTitle] = useState('');
   const [examDescription, setExamDescription] = useState('');
   const [questions, setQuestions] = useState<Question[]>([
-    { id: '1', questionText: '', answerKey: '' }
+    { id: '1', questionText: '', answerKey: '', marks: 1 }
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const addQuestion = () => {
     const newId = (questions.length + 1).toString();
-    setQuestions([...questions, { id: newId, questionText: '', answerKey: '' }]);
+    setQuestions([...questions, { id: newId, questionText: '', answerKey: '', marks: 1 }]);
   };
 
   const removeQuestion = (id: string) => {
@@ -37,7 +38,7 @@ const CreateExam = () => {
     }
   };
 
-  const updateQuestion = (id: string, field: 'questionText' | 'answerKey', value: string) => {
+  const updateQuestion = (id: string, field: 'questionText' | 'answerKey' | 'marks', value: string | number) => {
     setQuestions(questions.map(q => 
       q.id === id ? { ...q, [field]: value } : q
     ));
@@ -78,6 +79,7 @@ const CreateExam = () => {
         question_text: question.questionText.trim(),
         answer_key: question.answerKey.trim(),
         question_number: index + 1,
+        marks: question.marks,
       }));
 
       const { error: questionsError } = await supabase
@@ -208,6 +210,20 @@ const CreateExam = () => {
                             onChange={(e) => updateQuestion(question.id, 'answerKey', e.target.value)}
                             placeholder="Enter the correct answer or key points..."
                             rows={2}
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <Label htmlFor={`marks-${question.id}`}>Marks *</Label>
+                          <Input
+                            id={`marks-${question.id}`}
+                            type="number"
+                            min={1}
+                            value={question.marks}
+                            onChange={(e) => updateQuestion(question.id, 'marks', parseInt(e.target.value) || 1)}
+                            placeholder="Enter marks for this question"
+                            className="w-32"
                             required
                           />
                         </div>

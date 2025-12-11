@@ -74,6 +74,7 @@ export type Database = {
           created_at: string
           exam_id: string
           id: string
+          marks: number
           question_number: number
           question_text: string
         }
@@ -82,6 +83,7 @@ export type Database = {
           created_at?: string
           exam_id: string
           id?: string
+          marks?: number
           question_number: number
           question_text: string
         }
@@ -90,6 +92,7 @@ export type Database = {
           created_at?: string
           exam_id?: string
           id?: string
+          marks?: number
           question_number?: number
           question_text?: string
         }

@@ -113,7 +113,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center">
               <GraduationCap className="h-8 w-8 text-primary mr-3" />
-              <h1 className="text-2xl font-bold text-primary">EasyEval</h1>
+              <h1 className="text-2xl font-bold text-primary">ZenEval</h1>
             </div>
             
             <div className="flex items-center space-x-4">

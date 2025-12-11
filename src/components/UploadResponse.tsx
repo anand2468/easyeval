@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Dialog, 
   DialogContent, 
@@ -11,7 +12,8 @@ import {
   DialogHeader, 
   DialogTitle 
 } from '@/components/ui/dialog';
-import { Upload, Camera, X, CheckCircle } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Camera, X, CheckCircle, FileText, Image } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface UploadResponseProps {
@@ -20,52 +22,104 @@ interface UploadResponseProps {
   onSuccess: () => void;
 }
 
+interface Question {
+  id: string;
+  question_text: string;
+  question_number: number;
+  marks: number;
+}
+
+interface QuestionAnswer {
+  questionId: string;
+  answerType: 'text' | 'image';
+  answerText: string;
+  imageFile: File | null;
+  previewUrl: string | null;
+}
+
 const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => {
   const [rollNumber, setRollNumber] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [answers, setAnswers] = useState<Record<string, QuestionAnswer>>({});
   const [isUploading, setIsUploading] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  useEffect(() => {
+    fetchQuestions();
+  }, [examId]);
+
+  const fetchQuestions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('id, question_text, question_number, marks')
+        .eq('exam_id', examId)
+        .order('question_number');
+
+      if (error) throw error;
+      setQuestions(data || []);
+      
+      // Initialize answers for each question
+      const initialAnswers: Record<string, QuestionAnswer> = {};
+      (data || []).forEach(q => {
+        initialAnswers[q.id] = {
+          questionId: q.id,
+          answerType: 'text',
+          answerText: '',
+          imageFile: null,
+          previewUrl: null,
+        };
+      });
+      setAnswers(initialAnswers);
+    } catch (error: any) {
+      toast.error('Failed to load questions: ' + error.message);
+    } finally {
+      setLoadingQuestions(false);
+    }
+  };
+
+  const updateAnswer = (questionId: string, updates: Partial<QuestionAnswer>) => {
+    setAnswers(prev => ({
+      ...prev,
+      [questionId]: { ...prev[questionId], ...updates }
+    }));
+  };
+
+  const handleFileSelect = (questionId: string, file: File | null) => {
     if (file) {
       if (!file.type.startsWith('image/')) {
         toast.error('Please select an image file');
         return;
       }
-      
-      setSelectedFile(file);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      const previewUrl = URL.createObjectURL(file);
+      updateAnswer(questionId, { imageFile: file, previewUrl, answerType: 'image' });
     }
   };
 
-  const handleCameraCapture = () => {
-    cameraInputRef.current?.click();
-  };
-
-  const handleFileUpload = () => {
-    fileInputRef.current?.click();
-  };
-
-  const clearSelection = () => {
-    setSelectedFile(null);
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
+  const clearImage = (questionId: string) => {
+    const answer = answers[questionId];
+    if (answer?.previewUrl) {
+      URL.revokeObjectURL(answer.previewUrl);
     }
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
+    updateAnswer(questionId, { imageFile: null, previewUrl: null });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedFile || !rollNumber.trim()) {
-      toast.error('Please provide both roll number and image');
+    if (!rollNumber.trim()) {
+      toast.error('Please provide roll number');
+      return;
+    }
+
+    // Check if at least one answer is provided
+    const hasAnswer = Object.values(answers).some(
+      a => a.answerText.trim() || a.imageFile
+    );
+    if (!hasAnswer) {
+      toast.error('Please provide at least one answer');
       return;
     }
 
@@ -78,7 +132,7 @@ const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => 
         .select('id')
         .eq('exam_id', examId)
         .eq('roll_number', rollNumber.trim())
-        .single();
+        .maybeSingle();
 
       if (existingResponse) {
         toast.error('A response with this roll number already exists');
@@ -86,56 +140,76 @@ const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => 
         return;
       }
 
-      // Upload image to Supabase Storage
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${examId}/${rollNumber.trim()}_${Date.now()}.${fileExt}`;
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('response-images')
-        .upload(fileName, selectedFile);
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('response-images')
-        .getPublicUrl(fileName);
-
-      // Save response to database
+      // Create the main response record
       const { data: response, error: responseError } = await supabase
         .from('responses')
         .insert({
           exam_id: examId,
           roll_number: rollNumber.trim(),
-          image_url: publicUrl,
         })
         .select()
         .single();
 
       if (responseError) throw responseError;
 
+      // Upload individual answers
+      const answerPromises = Object.entries(answers).map(async ([questionId, answer]) => {
+        let imageUrl: string | null = null;
+        let answerText: string | null = answer.answerText.trim() || null;
+
+        // Upload image if provided
+        if (answer.imageFile) {
+          const fileExt = answer.imageFile.name.split('.').pop();
+          const fileName = `${examId}/${response.id}/${questionId}_${Date.now()}.${fileExt}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('response-images')
+            .upload(fileName, answer.imageFile);
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('response-images')
+            .getPublicUrl(fileName);
+
+          imageUrl = publicUrl;
+        }
+
+        // Only insert if there's content
+        if (imageUrl || answerText) {
+          return supabase
+            .from('response_answers')
+            .insert({
+              response_id: response.id,
+              question_id: questionId,
+              image_url: imageUrl,
+              answer_text: answerText,
+            });
+        }
+        return null;
+      });
+
+      await Promise.all(answerPromises.filter(Boolean));
+
       toast.success('Response uploaded successfully!');
       
       // Start AI evaluation
       setIsEvaluating(true);
       try {
-        const { data: evaluationResult, error: evalError } = await supabase.functions
+        const { error: evalError } = await supabase.functions
           .invoke('evaluate-response', {
-            body: { 
-              responseId: response.id,
-              imageUrl: publicUrl 
-            }
+            body: { responseId: response.id }
           });
 
         if (evalError) {
           console.error('Evaluation error:', evalError);
-          toast.warning('Response uploaded but evaluation failed. You can retry evaluation later.');
+          toast.warning('Response uploaded but evaluation failed. You can retry later.');
         } else {
           toast.success('Response evaluated successfully!');
         }
       } catch (evalError) {
         console.error('Evaluation error:', evalError);
-        toast.warning('Response uploaded but evaluation failed. You can retry evaluation later.');
+        toast.warning('Response uploaded but evaluation failed. You can retry later.');
       }
 
       setIsEvaluating(false);
@@ -148,13 +222,25 @@ const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => 
     }
   };
 
+  if (loadingQuestions) {
+    return (
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent className="max-w-3xl">
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Upload Student Response</DialogTitle>
           <DialogDescription>
-            Upload an answer sheet image and provide the student's roll number
+            Enter the student's roll number and provide answers for each question
           </DialogDescription>
         </DialogHeader>
 
@@ -172,102 +258,116 @@ const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => 
             />
           </div>
 
-          {/* File Upload Section */}
+          {/* Questions & Answers */}
           <div className="space-y-4">
-            <Label>Answer Sheet Image *</Label>
+            <Label className="text-lg font-semibold">Question Answers</Label>
             
-            {!selectedFile ? (
-              <div className="space-y-4">
-                {/* Upload Options */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card 
-                    className="upload-zone cursor-pointer"
-                    onClick={handleFileUpload}
-                  >
-                    <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                      <Upload className="h-10 w-10 text-primary mb-4" />
-                      <h3 className="font-semibold mb-2">Upload from Device</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Choose an image file from your device
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card 
-                    className="upload-zone cursor-pointer"
-                    onClick={handleCameraCapture}
-                  >
-                    <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                      <Camera className="h-10 w-10 text-primary mb-4" />
-                      <h3 className="font-semibold mb-2">Take Photo</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Capture image using your camera
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Preview */}
-                <Card className="academic-card">
-                  <CardHeader className="pb-4">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">Selected Image</CardTitle>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearSelection}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
+            {questions.map((question) => {
+              const answer = answers[question.id];
+              
+              return (
+                <Card key={question.id} className="border">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <span>Q{question.question_number}: {question.question_text}</span>
+                      <span className="text-sm text-muted-foreground font-normal">
+                        ({question.marks} marks)
+                      </span>
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {previewUrl && (
-                      <div className="relative">
-                        <img
-                          src={previewUrl}
-                          alt="Preview"
-                          className="w-full max-h-64 object-contain rounded-lg border"
+                    <Tabs 
+                      value={answer?.answerType || 'text'} 
+                      onValueChange={(v) => updateAnswer(question.id, { answerType: v as 'text' | 'image' })}
+                    >
+                      <TabsList className="grid w-full grid-cols-2 mb-4">
+                        <TabsTrigger value="text" className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          Text Answer
+                        </TabsTrigger>
+                        <TabsTrigger value="image" className="flex items-center gap-2">
+                          <Image className="h-4 w-4" />
+                          Image Upload
+                        </TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="text" className="mt-0">
+                        <Textarea
+                          value={answer?.answerText || ''}
+                          onChange={(e) => updateAnswer(question.id, { answerText: e.target.value })}
+                          placeholder="Type the student's answer here..."
+                          rows={3}
                         />
-                      </div>
-                    )}
-                    <div className="mt-3 text-sm text-muted-foreground">
-                      <p><strong>File:</strong> {selectedFile.name}</p>
-                      <p><strong>Size:</strong> {(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                    </div>
+                      </TabsContent>
+
+                      <TabsContent value="image" className="mt-0">
+                        {!answer?.imageFile ? (
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => fileInputRefs.current[question.id]?.click()}
+                            >
+                              <Upload className="h-4 w-4 mr-2" />
+                              Upload Image
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => {
+                                const input = document.createElement('input');
+                                input.type = 'file';
+                                input.accept = 'image/*';
+                                input.capture = 'environment';
+                                input.onchange = (e) => {
+                                  const file = (e.target as HTMLInputElement).files?.[0];
+                                  if (file) handleFileSelect(question.id, file);
+                                };
+                                input.click();
+                              }}
+                            >
+                              <Camera className="h-4 w-4 mr-2" />
+                              Take Photo
+                            </Button>
+                            <input
+                              ref={(el) => (fileInputRefs.current[question.id] = el)}
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleFileSelect(question.id, e.target.files?.[0] || null)}
+                              className="hidden"
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative">
+                              <img
+                                src={answer.previewUrl || ''}
+                                alt="Answer preview"
+                                className="w-full max-h-40 object-contain rounded-lg border"
+                              />
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-2 right-2 h-6 w-6"
+                                onClick={() => clearImage(question.id)}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {answer.imageFile?.name}
+                            </p>
+                          </div>
+                        )}
+                      </TabsContent>
+                    </Tabs>
                   </CardContent>
                 </Card>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full"
-                >
-                  Choose Different Image
-                </Button>
-              </div>
-            )}
+              );
+            })}
           </div>
 
           {/* Submit Buttons */}
@@ -282,7 +382,7 @@ const UploadResponse = ({ examId, onClose, onSuccess }: UploadResponseProps) => 
             </Button>
             <Button
               type="submit"
-              disabled={!selectedFile || !rollNumber.trim() || isUploading || isEvaluating}
+              disabled={!rollNumber.trim() || isUploading || isEvaluating}
               className="academic-gradient text-white shadow-[var(--shadow-primary)]"
             >
               {isUploading ? (

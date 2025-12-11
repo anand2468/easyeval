@@ -106,13 +106,64 @@ export type Database = {
           },
         ]
       }
+      response_answers: {
+        Row: {
+          answer_text: string | null
+          created_at: string
+          evaluated_at: string | null
+          id: string
+          image_url: string | null
+          marks: number | null
+          question_id: string
+          remarks: string | null
+          response_id: string
+        }
+        Insert: {
+          answer_text?: string | null
+          created_at?: string
+          evaluated_at?: string | null
+          id?: string
+          image_url?: string | null
+          marks?: number | null
+          question_id: string
+          remarks?: string | null
+          response_id: string
+        }
+        Update: {
+          answer_text?: string | null
+          created_at?: string
+          evaluated_at?: string | null
+          id?: string
+          image_url?: string | null
+          marks?: number | null
+          question_id?: string
+          remarks?: string | null
+          response_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "response_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "response_answers_response_id_fkey"
+            columns: ["response_id"]
+            isOneToOne: false
+            referencedRelation: "responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       responses: {
         Row: {
           created_at: string
           evaluated_at: string | null
           exam_id: string
           id: string
-          image_url: string
+          image_url: string | null
           marks: number | null
           remarks: string | null
           roll_number: string
@@ -122,7 +173,7 @@ export type Database = {
           evaluated_at?: string | null
           exam_id: string
           id?: string
-          image_url: string
+          image_url?: string | null
           marks?: number | null
           remarks?: string | null
           roll_number: string
@@ -132,7 +183,7 @@ export type Database = {
           evaluated_at?: string | null
           exam_id?: string
           id?: string
-          image_url?: string
+          image_url?: string | null
           marks?: number | null
           remarks?: string | null
           roll_number?: string

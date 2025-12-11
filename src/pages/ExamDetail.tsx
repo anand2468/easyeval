@@ -30,16 +30,27 @@ interface Question {
   question_text: string;
   answer_key: string;
   question_number: number;
+  marks: number;
+}
+
+interface ResponseAnswer {
+  id: string;
+  question_id: string;
+  image_url: string | null;
+  answer_text: string | null;
+  marks: number | null;
+  remarks: string | null;
+  evaluated_at: string | null;
 }
 
 interface Response {
   id: string;
   roll_number: string;
-  image_url: string;
   marks: number | null;
   remarks: string | null;
   evaluated_at: string | null;
   created_at: string;
+  response_answers?: ResponseAnswer[];
 }
 
 const ExamDetail = () => {
@@ -79,10 +90,15 @@ const ExamDetail = () => {
       if (questionsError) throw questionsError;
       setQuestions(questionsData || []);
 
-      // Fetch responses
+      // Fetch responses with answers
       const { data: responsesData, error: responsesError } = await supabase
         .from('responses')
-        .select('*')
+        .select(`
+          *,
+          response_answers (
+            id, question_id, image_url, answer_text, marks, remarks, evaluated_at
+          )
+        `)
         .eq('exam_id', examId)
         .order('created_at', { ascending: false });
 
@@ -270,15 +286,13 @@ const ExamDetail = () => {
             ) : (
               <div className="space-y-4">
                 {responses.map((response) => (
-                  <div key={response.id} className="border border-border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div>
-                          <h4 className="font-semibold">Roll Number: {response.roll_number}</h4>
-                          <p className="text-sm text-muted-foreground">
-                            Uploaded on {formatDate(response.created_at)}
-                          </p>
-                        </div>
+                  <div key={response.id} className="border border-border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h4 className="font-semibold">Roll Number: {response.roll_number}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Uploaded on {formatDate(response.created_at)}
+                        </p>
                       </div>
 
                       <div className="flex items-center space-x-4">
@@ -288,10 +302,7 @@ const ExamDetail = () => {
                               Evaluated
                             </Badge>
                             <div className="text-sm">
-                              <span className="font-semibold">Marks: {response.marks}</span>
-                              {response.remarks && (
-                                <p className="text-muted-foreground mt-1">{response.remarks}</p>
-                              )}
+                              <span className="font-semibold">Total: {response.marks} marks</span>
                             </div>
                           </div>
                         ) : (
@@ -299,17 +310,53 @@ const ExamDetail = () => {
                             Pending Evaluation
                           </Badge>
                         )}
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => window.open(response.image_url, '_blank')}
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Image
-                        </Button>
                       </div>
                     </div>
+
+                    {/* Individual Question Answers */}
+                    {response.response_answers && response.response_answers.length > 0 && (
+                      <div className="grid gap-3 mt-4 pt-4 border-t border-border">
+                        {response.response_answers.map((answer) => {
+                          const question = questions.find(q => q.id === answer.question_id);
+                          return (
+                            <div key={answer.id} className="bg-muted/50 rounded-lg p-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium">
+                                    Q{question?.question_number}: {question?.question_text}
+                                  </p>
+                                  {answer.answer_text && (
+                                    <p className="text-sm mt-1 text-muted-foreground">
+                                      Answer: {answer.answer_text}
+                                    </p>
+                                  )}
+                                  {answer.image_url && (
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="p-0 h-auto mt-1"
+                                      onClick={() => window.open(answer.image_url!, '_blank')}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      View Image
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="text-right ml-4">
+                                  {answer.marks !== null ? (
+                                    <span className="text-sm font-semibold text-primary">
+                                      {answer.marks}/{question?.marks || 1}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">Pending</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
